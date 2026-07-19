@@ -1,5 +1,5 @@
 // ==================================================
-// diagnostics.js — Direct CONFIGURATION detection
+// diagnostics.js — Correct CONFIGURATION timing (Option B)
 // ==================================================
 
 module.exports = {
@@ -20,19 +20,11 @@ module.exports = {
     },
 
     attachBot(bot) {
-        // --------------------------------------------------
-        // Basic connection stages
-        // --------------------------------------------------
-
         bot.on("connect", () => this.log("[Stage] TCP connected"));
         bot.on("inject_allowed", () => this.log("[Stage] Protocol injected"));
         bot.on("login", () => this.log("[Stage] Login packet received"));
         bot.on("game", () => this.log("[Stage] Game state received"));
         bot.on("respawn", () => this.log("[Stage] Respawn event fired"));
-
-        // --------------------------------------------------
-        // Resource pack logging ONLY — no accept/reject
-        // --------------------------------------------------
 
         bot.on("resourcePack", (url, hash) => {
             this.section("Resource Pack");
@@ -42,13 +34,12 @@ module.exports = {
             this.log("NOTE: No accept/reject sent (safe mode for 1.20+)");
         });
 
-        // --------------------------------------------------
-        // Direct CONFIGURATION detection + finish_configuration
-        // --------------------------------------------------
-
         const client = bot._client;
         if (!client) return;
 
+        let gotRegistry = false;
+        let gotFeatureFlags = false;
+        let gotDataPacks = false;
         let configFinished = false;
 
         client.on("packet", (data, meta) => {
@@ -72,15 +63,26 @@ module.exports = {
                 this.log(`[Packet] ${meta.name}`);
             }
 
-            // Detect CONFIGURATION state packets
-            if (!configFinished && (
-                meta.name === "registry_data" ||
-                meta.name === "feature_flags" ||
-                meta.name === "data_packs"
-            )) {
-                this.section("Configuration Detected");
-                this.log("Configuration packets received (" + meta.name + ")");
-                this.log("Sending finish_configuration immediately (direct detection)");
+            if (meta.name === "registry_data") {
+                gotRegistry = true;
+                this.log("[Config] registry_data received");
+            }
+
+            if (meta.name === "feature_flags") {
+                gotFeatureFlags = true;
+                this.log("[Config] feature_flags received");
+            }
+
+            if (meta.name === "data_packs") {
+                gotDataPacks = true;
+                this.log("[Config] data_packs received");
+            }
+
+            // Only send finish_configuration when ALL config packets are done
+            if (!configFinished && gotRegistry && gotFeatureFlags && gotDataPacks) {
+                this.section("Configuration Complete");
+                this.log("All configuration packets received");
+                this.log("Sending finish_configuration (correct timing)");
 
                 try {
                     client.write("finish_configuration", {});
@@ -100,10 +102,6 @@ module.exports = {
             this.section("Disconnect Packet");
             console.log(packet);
         });
-
-        // --------------------------------------------------
-        // Socket diagnostics
-        // --------------------------------------------------
 
         if (client.socket) {
             client.socket.on("timeout", () => this.log("[Socket] Timeout"));
