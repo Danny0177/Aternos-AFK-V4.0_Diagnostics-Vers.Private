@@ -1,137 +1,103 @@
 // ==================================================
-// AFK BOT v4.1 — Deep Diagnostic Edition
+// index.js — AFK Bot with Lightweight Heartbeat
 // ==================================================
 
-const http = require("http");
-const mineflayer = require("mineflayer");
-const settings = require("./settings.json");
+const mineflayer = require('mineflayer');
+const settings = require('./settings.json');
+const diagnostics = require('./diagnostics.js');
 
-const Diagnostics = require("./diagnostics");
-const ReconnectController = require("./reconnect");
+let bot;
+let reconnectTimeout = null;
 
-// --------------------------------------------------
-// Version banner
-// --------------------------------------------------
-
-console.log("==================================================");
-console.log("        AFK BOT v4.1 — Deep Diagnostic Mode        ");
-console.log("==================================================");
-
-// --------------------------------------------------
-// HTTP server for Railway health checks
-// --------------------------------------------------
-
-const PORT = process.env.PORT || 8080;
-
-http.createServer((req, res) => {
-    res.writeHead(200);
-    res.end("AFK bot is running");
-}).listen(PORT);
-
-// --------------------------------------------------
-// Global state
-// --------------------------------------------------
-
-let bot = null;
-let spawnTimeout = null;
-let activityInterval = null;
-
-// --------------------------------------------------
-// Create bot
-// --------------------------------------------------
+// ==================================================
+// Create Bot
+// ==================================================
 
 function createBot() {
-    Diagnostics.banner("Creating bot instance");
+    console.log("==================================================");
+    console.log(`[${new Date().toLocaleTimeString()}] Creating bot instance`);
+    console.log("==================================================");
 
     bot = mineflayer.createBot({
-        host: settings.server.host,
-        port: settings.server.port,
-        username: settings.account.username,
-        version: settings.server.version,
-        hideErrors: false
+        host: settings.host,
+        port: settings.port,
+        username: settings.username,
+        version: settings.version // now set to "1.20.1"
     });
 
-    Diagnostics.attachBot(bot);
-    ReconnectController.attachBot(bot);
+    diagnostics.attachBot(bot);
 
-    // --------------------------------------------------
-    // Spawn timeout
-    // --------------------------------------------------
-
-    spawnTimeout = setTimeout(() => {
-        Diagnostics.section("Spawn Timeout");
-        Diagnostics.log("Spawn not reached within 180 seconds");
-        Diagnostics.log("Destroying connection and retrying");
-
-        try { bot.end(); } catch {}
-        ReconnectController.schedule("spawn timeout");
-
-    }, 180000);
-
-    // --------------------------------------------------
-    // Spawn success
-    // --------------------------------------------------
-
-    bot.once("spawn", () => {
-        clearTimeout(spawnTimeout);
-        ReconnectController.resetDelay();
-
-        Diagnostics.section("Spawn Reached");
-        Diagnostics.log("Bot successfully entered the world");
-
-        if (settings.loginCommand) {
-            setTimeout(() => {
-                try {
-                    Diagnostics.log("Sending login command");
-                    bot.chat(settings.loginCommand);
-                } catch (e) {
-                    Diagnostics.log("Login command failed: " + e.message);
-                }
-            }, 3000);
-        }
-
-        activityInterval = setInterval(() => {
-            try {
-                bot.look(bot.entity.yaw + 0.05, bot.entity.pitch, true);
-                Diagnostics.log("Heartbeat tick");
-            } catch (e) {
-                Diagnostics.log("Heartbeat failed: " + e.message);
-            }
-        }, settings.activity.interval || 300000);
+    bot.on('spawn', () => {
+        console.log(`[${new Date().toLocaleTimeString()}] Bot spawned successfully`);
+        startHeartbeat();
     });
 
-    // --------------------------------------------------
-    // Disconnects
-    // --------------------------------------------------
-
-    bot.on("end", reason => {
-        clearTimeout(spawnTimeout);
-        clearInterval(activityInterval);
-
-        Diagnostics.section("End Event");
-        Diagnostics.log("Connection ended: " + reason);
-
-        ReconnectController.schedule("end event");
+    bot.on('end', () => {
+        console.log("==================================================");
+        console.log(`[${new Date().toLocaleTimeString()}] End Event`);
+        console.log("==================================================");
+        scheduleReconnect("socketClosed");
     });
 
-    bot.on("kicked", reason => {
-        Diagnostics.section("Kicked");
-        Diagnostics.log("Server kicked the bot:");
-        console.log(reason);
-    });
-
-    bot.on("error", err => {
-        Diagnostics.section("Error");
-        Diagnostics.log("Error: " + err.message);
-
-        ReconnectController.schedule("error");
+    bot.on('error', (err) => {
+        console.log("==================================================");
+        console.log(`[${new Date().toLocaleTimeString()}] Error`);
+        console.log(err);
+        console.log("==================================================");
+        scheduleReconnect("error");
     });
 }
 
-// --------------------------------------------------
-// Start bot
-// --------------------------------------------------
+// ==================================================
+// Reconnect Logic
+// ==================================================
+
+function scheduleReconnect(reason) {
+    if (reconnectTimeout) {
+        console.log(`[${new Date().toLocaleTimeString()}] [Reconnect] Already scheduled, ignoring duplicate`);
+        return;
+    }
+
+    const delay = reason === "error" ? 20000 : 10000;
+    console.log(`[${new Date().toLocaleTimeString()}] [Reconnect] Scheduling reconnect in ${delay / 1000}s (${reason})`);
+
+    reconnectTimeout = setTimeout(() => {
+        reconnectTimeout = null;
+        console.log("==================================================");
+        console.log(`[${new Date().toLocaleTimeString()}] Reconnect`);
+        console.log("==================================================");
+        console.log(`[${new Date().toLocaleTimeString()}] Reconnecting now...`);
+        createBot();
+    }, delay);
+}
+
+// ==================================================
+// Lightweight Heartbeat (AFK‑Proof)
+// ==================================================
+
+function heartbeat() {
+    if (!bot || !bot.entity) return;
+
+    // 1. Tiny head turn
+    const yaw = bot.entity.yaw + (Math.random() * 0.2 - 0.1);
+    const pitch = bot.entity.pitch + (Math.random() * 0.1 - 0.05);
+    bot.look(yaw, pitch, true);
+
+    // 2. Swing arm (punch air)
+    bot.swingArm("right");
+
+    // 3. Sneak pulse
+    bot.setControlState("sneak", true);
+    setTimeout(() => bot.setControlState("sneak", false), 300);
+}
+
+function startHeartbeat() {
+    console.log(`[${new Date().toLocaleTimeString()}] Heartbeat started (20s interval)`);
+    setInterval(() => heartbeat(), 20000);
+}
+
+// ==================================================
+// Start Bot
+// ==================================================
 
 createBot();
-
-module.exports = { createBot };
